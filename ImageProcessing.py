@@ -22,7 +22,7 @@ def f2(a):
         x=0
     return x
         
-def CalcZMap(image, thr, small_obj):
+def _CalcZMap(image, thr, small_obj):
     mask=morphology.remove_small_objects(image>thr,small_obj)    #exclude objects smaller than 30 pixels, can be customized
     Z=np.squeeze(np.apply_along_axis(f1,1, mask))
     #z2=np.squeeze(np.apply_along_axis(f2,1, mask))
@@ -30,6 +30,34 @@ def CalcZMap(image, thr, small_obj):
     H=np.mean(Z[Z>0])
     R=np.std(Z[Z>0])/H
     return mask,Z,V,H,R#,z2
+
+def CalcZMap(image, thr, small_obj): # mask is 2d
+    mask=morphology.remove_small_objects(image>thr,small_obj)
+    mask = mask[0]
+    surface = mask.argmax(axis=0)
+    substrate = mask.shape[0] - np.flip(mask, axis=0).argmax(axis=0) - 1
+    fig,ax = plt.subplots(1)
+    im = ax.imshow(mask,cmap='gray')
+    plt.plot(np.arange(surface.shape[0]), surface, ls='-', c='red', lw=1)
+    plt.axhline(y=np.min(substrate), color='b', linestyle='--')
+    
+
+    ref_surf = np.min(substrate)
+    mask = mask[:ref_surf]
+    # recalculate surface and substrate
+    surface = mask.argmax(axis=0)
+    substrate = mask.shape[0] - np.flip(mask, axis=0).argmax(axis=0) - 1
+    
+    Z=np.squeeze(np.apply_along_axis(f1, 0, mask))
+    V=np.sum(mask)    #calc volume as sum of 1 in mask
+    H=np.mean(Z[Z>0])
+    plt.axhline(y=ref_surf - H, color='y', linestyle='--')
+    Rq = np.std(Z[Z>0])/H #Root-mean-square of heights
+    Ra=np.mean(abs(Z[Z>0]-H))/H #Arithmetic average of heights, normalized.
+    SL = np.sum(mask[0:int(mask.shape[0]-H/2),:]) / V
+    bio_vol = np.sum(substrate-surface+1)
+    density = V/bio_vol
+    return fig, V,H,Rq,Ra, SL, density
 
 def find_ol(image1,image2,ol):
     sy,sx=image1.shape

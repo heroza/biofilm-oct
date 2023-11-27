@@ -11,6 +11,8 @@ import warnings
 import os
 import xmltodict
 from warnings import warn
+import torch
+from segment_anything import sam_model_registry, SamAutomaticMaskGenerator, SamPredictor
 
 
 def unzip_OCTFile(filename):
@@ -122,3 +124,21 @@ def show_box(box, ax):
     x0, y0 = box[0], box[1]
     w, h = box[2] - box[0], box[3] - box[1]
     ax.add_patch(plt.Rectangle((x0, y0), w, h, edgecolor='green', facecolor=(0,0,0,0), lw=2))
+
+def sam_predict(CHECKPOINT_PATH, img_array, input_point, input_label, multimask_output = False):
+    DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    MODEL_TYPE = "vit_h"
+
+    sam = sam_model_registry[MODEL_TYPE](checkpoint=CHECKPOINT_PATH).to(device=DEVICE)
+    mask_predictor = SamPredictor(sam)  
+    out_img_array = []
+    for img_rgb in img_array:
+        mask_predictor.set_image(img_rgb) 
+        masks, scores, logits = mask_predictor.predict(
+            point_coords=input_point,
+            point_labels=input_label,
+            multimask_output=multimask_output, # False for include only the best mask
+        )
+        for i, (mask, score) in enumerate(zip(masks, scores)):
+            out_img_array.append(mask)
+    return np.array(out_img_array)
