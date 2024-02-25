@@ -6,7 +6,8 @@ from skimage.morphology import closing, square, reconstruction
 from skimage import filters
 from PIL import Image
 import cv2
-from numba import jit
+from sklearn.linear_model import LinearRegression
+import math
 
 def f1(a):
     try:
@@ -31,7 +32,84 @@ def _CalcZMap(image, thr, small_obj):
     R=np.std(Z[Z>0])/H
     return mask,Z,V,H,R#,z2
 
-def CalcZMap(image, thr, small_obj): # mask is 2d
+def rotate_image(image_array, angle):
+    image_array_int = image_array.astype(np.uint8)
+    # Get image center coordinates
+    center = tuple(np.array(image_array.shape[1::-1]) / 2)
+    
+    # Calculate rotation matrix
+    rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
+    
+    # Perform the rotation
+    rotated_image_array = cv2.warpAffine(image_array_int, rotation_matrix, image_array.shape[1::-1], flags=cv2.INTER_LINEAR)
+    
+    return rotated_image_array
+
+def replace_zeros_with_nearest(arr):
+    mask = arr==0
+    arr[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), arr[~mask])
+    
+    return arr
+
+def CalcZMap(image, thr=0, small_obj=30): # mask is 2d
+    mask=morphology.remove_small_objects(image>thr,small_obj)
+    mask = mask[0]
+    substrate = mask.shape[0] - np.flip(mask, axis=0).argmax(axis=0) - 1
+    # smoothing substrate with linear regression
+    model = LinearRegression()
+    x = np.arange(substrate.shape[0])
+    x_2d = x[:, np.newaxis]
+    model.fit(x_2d, substrate)
+
+    # calculate angle
+    slope = model.coef_[0]
+    angle_radians = np.arctan(slope)
+    angle_degrees = np.degrees(angle_radians)
+
+    if angle_degrees != 0:
+        mask = rotate_image(mask, angle_degrees)
+        # recalculate surface and substrate based on rotated mask
+        substrate = mask.shape[0] - np.flip(mask, axis=0).argmax(axis=0) - 1
+        
+        # smoothing substrate with linear regression
+        model = LinearRegression()
+        x = np.arange(substrate.shape[0])
+        x_2d = x[:, np.newaxis]
+        model.fit(x_2d, substrate)
+    
+    surface = mask.argmax(axis=0)
+    # replace zero with nearest
+    surface = replace_zeros_with_nearest(surface)
+    substrate = model.predict(x_2d)
+    ref_surf = int(np.min(substrate))
+
+    fig,ax = plt.subplots(1)
+    im = ax.imshow(mask,cmap='gray')
+    plt.axhline(y=ref_surf, color='b', linestyle='--')
+    plt.plot(np.arange(surface.shape[0]), surface, ls='-', c='red', lw=1)
+
+    mask = mask[:ref_surf]
+    # recalculate surface and substrate based on croped mask
+    surface = mask.argmax(axis=0)
+    # replace zero with nearest
+    surface = replace_zeros_with_nearest(surface)
+    substrate = mask.shape[0] - np.flip(mask, axis=0).argmax(axis=0) - 1
+    
+    Z=np.squeeze(np.apply_along_axis(f1, 0, mask))
+    V=np.sum(mask)    #calc volume as sum of 1 in mask
+    H=np.mean(Z[Z>0])
+    plt.axhline(y=ref_surf - H, color='y', linestyle='--')
+    Rq = np.std(Z[Z>0])/H #Root-mean-square of heights
+    Ra=np.mean(abs(Z[Z>0]-H))/H #Arithmetic average of heights, normalized.
+    if(math.isnan(H)):
+        SL = 0
+    else:
+        SL = np.sum(mask[0:int(mask.shape[0]-H/2),:]) / V
+    bio_vol = np.sum(substrate-surface+1)
+    density = V/bio_vol
+    return fig, V,H,Rq,Ra, SL, density
+
+def CalcZMap2(image, thr, small_obj): # mask is 2d
     mask=morphology.remove_small_objects(image>thr,small_obj)
     mask = mask[0]
     surface = mask.argmax(axis=0)
@@ -39,6 +117,7 @@ def CalcZMap(image, thr, small_obj): # mask is 2d
     fig,ax = plt.subplots(1)
     im = ax.imshow(mask,cmap='gray')
     plt.plot(np.arange(surface.shape[0]), surface, ls='-', c='red', lw=1)
+    # plt.plot(np.arange(substrate.shape[0]), substrate, ls='-', c='b', lw=1)
     plt.axhline(y=np.min(substrate), color='b', linestyle='--')
     
 
@@ -54,7 +133,10 @@ def CalcZMap(image, thr, small_obj): # mask is 2d
     plt.axhline(y=ref_surf - H, color='y', linestyle='--')
     Rq = np.std(Z[Z>0])/H #Root-mean-square of heights
     Ra=np.mean(abs(Z[Z>0]-H))/H #Arithmetic average of heights, normalized.
-    SL = np.sum(mask[0:int(mask.shape[0]-H/2),:]) / V
+    if(math.isnan(H)):
+        SL = 0
+    else:
+        SL = np.sum(mask[0:int(mask.shape[0]-H/2),:]) / V
     bio_vol = np.sum(substrate-surface+1)
     density = V/bio_vol
     return fig, V,H,Rq,Ra, SL, density
