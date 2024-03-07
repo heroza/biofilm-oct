@@ -45,8 +45,8 @@ def rotate_image(image_array, angle):
     
     return rotated_image_array
 
-def replace_zeros_with_nearest(arr):
-    mask = arr==0
+def replace_noise_with_nearest(arr, noise):
+    mask = arr==noise
     arr[mask] = np.interp(np.flatnonzero(mask), np.flatnonzero(~mask), arr[~mask])
     
     return arr
@@ -54,7 +54,8 @@ def replace_zeros_with_nearest(arr):
 def CalcZMap(image, thr=0, small_obj=30): # mask is 2d
     mask=morphology.remove_small_objects(image>thr,small_obj)
     mask = mask[0]
-    substrate = mask.shape[0] - np.flip(mask, axis=0).argmax(axis=0) - 1
+    substrate = mask.shape[0] - np.flip(mask, axis=0).argmax(axis=0) - 1 
+    substrate = replace_noise_with_nearest(substrate, mask.shape[0]-1)
     # smoothing substrate with linear regression
     model = LinearRegression()
     x = np.arange(substrate.shape[0])
@@ -70,7 +71,7 @@ def CalcZMap(image, thr=0, small_obj=30): # mask is 2d
         mask = rotate_image(mask, angle_degrees)
         # recalculate surface and substrate based on rotated mask
         substrate = mask.shape[0] - np.flip(mask, axis=0).argmax(axis=0) - 1
-        
+        substrate = replace_noise_with_nearest(substrate, mask.shape[0]-1)
         # smoothing substrate with linear regression
         model = LinearRegression()
         x = np.arange(substrate.shape[0])
@@ -79,7 +80,7 @@ def CalcZMap(image, thr=0, small_obj=30): # mask is 2d
     
     surface = mask.argmax(axis=0)
     # replace zero with nearest
-    surface = replace_zeros_with_nearest(surface)
+    surface = replace_noise_with_nearest(surface, 0)
     substrate = model.predict(x_2d)
     ref_surf = int(np.min(substrate))
 
@@ -91,9 +92,8 @@ def CalcZMap(image, thr=0, small_obj=30): # mask is 2d
     mask = mask[:ref_surf]
     # recalculate surface and substrate based on croped mask
     surface = mask.argmax(axis=0)
-    # replace zero with nearest
-    surface = replace_zeros_with_nearest(surface)
-    substrate = mask.shape[0] - np.flip(mask, axis=0).argmax(axis=0) - 1
+    surface = replace_noise_with_nearest(surface,0)
+    substrate = np.full(mask.shape[1], mask.shape[0])
     
     Z=np.squeeze(np.apply_along_axis(f1, 0, mask))
     V=np.sum(mask)    #calc volume as sum of 1 in mask
